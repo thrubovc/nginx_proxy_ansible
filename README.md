@@ -7,4 +7,4 @@ The TLS certificate is created and automatically refreshed by certbot, which aut
 I used [this docker image](https://github.com/linuxserver/docker-letsencrypt) as the base for this setup and modified it to suit my needs. It is suitable for use in e.g. a Proxmox LXC dedicated for this purpose.
 
 **Other features:**
-It also installs the [VTS module](https://github.com/vozlt/nginx-module-vts) for use with a Grafana dashboard.
+It also installs the [VTS module](https://github.com/vozlt/nginx-module-vts) for use with Prometheus and Grafana.
