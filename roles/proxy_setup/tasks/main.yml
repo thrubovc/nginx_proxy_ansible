@@ -129,5 +129,5 @@
   register: cert_path
 
 - name: run certbot in case the domain certificate does not yet exist
-  shell: /etc/cron.daily/certbot-renew.sh
+  shell: /etc/cron.daily/certbot-renew
   when: not cert_path.stat.exists
