@@ -1,0 +1,133 @@
+- name: Setting constants for the playbook
+  set_fact:
+    DOMAIN_NAME: example.com
+    EMAIL_ADDRESS: example@example.com
+    CLOUDFLARE_API_KEY: YourCloudflareApiKey
+
+- name: apt update & upgrade
+  apt:
+    update_cache: true
+    upgrade: dist
+
+- name: install packages
+  apt:
+    name: ['nginx', 'libpcre2-dev', 'libpcre3-dev', 'git', 'unzip', 'tar', 'vim', 'python3-pip', 'gnupg', 'whois']
+
+- name: pip install certbot and packages
+  pip:
+    state: latest
+    executable: '/usr/bin/pip3'
+    name: ['certbot', 'certbot-dns-cloudflare']
+
+- name: put deb-src lines in apt sources.list
+  lineinfile:
+    path: /etc/apt/sources.list
+    line: '{{ item }}'
+  with_items:
+    - deb-src http://archive.ubuntu.com/ubuntu focal main restricted universe multiverse
+    - deb-src http://archive.ubuntu.com/ubuntu focal-updates main restricted universe multiverse
+    - deb-src http://security.ubuntu.com/ubuntu focal-security main restricted universe multiverse
+
+- name: apt update
+  apt:
+    update_cache: true
+
+- name: download source code for nginx
+  shell:
+    chdir: /tmp
+    cmd: apt source nginx
+
+- name: git clone vts module repo
+  git:
+    repo: https://github.com/vozlt/nginx-module-vts.git
+    dest: /tmp/vts-module
+
+- name: find the path to nginx source
+  find:
+    paths: /tmp
+    file_type: directory
+    patterns: "nginx-*"
+    use_regex: true
+  register: nginx_src
+
+- name: dynamically compile the vts module
+  shell:
+    chdir: '{{ item.path }}'
+    cmd: |
+      ./configure --with-compat --add-dynamic-module=/tmp/vts-module;
+      make modules
+  with_items: '{{ nginx_src.files }}'
+
+- name: copy the vts module in place
+  copy:
+    remote_src: true
+    src: '{{ item.path }}/objs/ngx_http_vhost_traffic_status_module.so'
+    dest: /usr/share/nginx/modules/ngx_http_vhost_traffic_status_module.so
+  with_items: '{{ nginx_src.files }}'
+  notify: restart nginx
+
+- name: cloudflare.ini template
+  template:
+    dest: /etc/nginx/cloudflare.ini
+    src: cloudflare.ini
+
+- name: setup nginx - copy dhparams.pem
+  template:
+    dest: /etc/nginx/dhparams.pem
+    src: dhparams.pem
+  notify: restart nginx
+
+- name: setup nginx - copy nginx.conf
+  template:
+    backup: true
+    dest: /etc/nginx/nginx.conf
+    src: nginx.conf
+  notify: restart nginx
+
+- name: setup nginx - copy proxy.conf
+  template:
+    backup: true
+    dest: /etc/nginx/proxy.conf
+    src: proxy.conf
+  notify: restart nginx
+
+- name: setup nginx - copy default site conf
+  template:
+    dest: /etc/nginx/sites-enabled/default
+    src: default
+  notify: restart nginx
+
+- name: setup nginx - copy ssl.conf
+  template:
+    backup: true
+    dest: /etc/nginx/ssl.conf
+    src: ssl.conf
+  notify: restart nginx
+
+- name: setup nginx - create proxy-confs dir
+  file:
+    state: directory
+    path: /etc/nginx/proxy-confs
+
+- name: setup nginx - copy proxy conf files
+  copy:
+    dest: /etc/nginx/proxy-confs
+    src: '{{ item }}'
+  with_fileglob:
+    - roles/proxy_setup/proxy-confs/*
+  notify: restart nginx
+
+- name: put certbot-renew in cron.daily
+  template:
+    src: certbot-renew
+    dest: /etc/cron.daily/certbot-renew
+    mode: 0755
+
+- name: check if the certificate for the domain exists
+  stat:
+    path: /etc/letsencrypt/live/{{ DOMAIN_NAME }}
+  register: cert_path
+
+- name: run certbot in case the domain certificate does not yet exist
+  shell: /etc/cron.daily/certbot-renew.sh
+  when: not cert_path.stat.exists
